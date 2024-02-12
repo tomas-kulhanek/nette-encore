@@ -1,42 +1,55 @@
 <?php
+
+declare(strict_types=1);
+
 namespace vavo\EncoreLoader\DI;
 
-use Nette\Bridges\ApplicationLatte\ILatteFactory;
+use Nette\Bridges\ApplicationLatte\LatteFactory;
 use Nette\DI\CompilerExtension;
-use Nette\PhpGenerator\PhpLiteral;
+use Nette\DI\Definitions\FactoryDefinition;
+use Nette\DI\Definitions\Statement;
+use Nette\DI\InvalidConfigurationException;
 use Nette\Schema\Expect;
 use Nette\Schema\Schema;
 use vavo\EncoreLoader\EncoreLoaderFactory;
 use vavo\EncoreLoader\EncoreLoaderService;
-use vavo\EncoreLoader\macro\AssetMacroSet;
 
-class EncoreLoaderExtension extends CompilerExtension
+final class EncoreLoaderExtension extends CompilerExtension
 {
-	public function getConfigSchema(): Schema
-	{
-		return Expect::structure([
-			'outDir' => Expect::string()->default('\build'),
-			'defaultEntry' => Expect::string()->default('index')
-		]);
-	}
+    public function getConfigSchema(): Schema
+    {
+        parent::getConfigSchema();
 
+        return Expect::structure(
+            [
+                'outDir'       => Expect::string()->default('\build'),
+                'defaultEntry' => Expect::string()->default('index'),
+            ]
+        );
+    }
 
-	public function loadConfiguration()
-	{
-		$builder = $this->getContainerBuilder();
+    public function loadConfiguration(): void
+    {
+        $containerBuilder = $this->getContainerBuilder();
+        $definition = $containerBuilder->getDefinitionByType(LatteFactory::class);
 
-		$encoreLoaderService = $builder->addDefinition($this->prefix('encoreLoaderService'))
-			->setFactory(EncoreLoaderService::class, [(array) $this->config]);
+        $containerBuilder->addDefinition($this->prefix('encoreLoaderService'))
+            ->setFactory(EncoreLoaderService::class, [(array)$this->config]);
 
-		$builder->getDefinitionByType(ILatteFactory::class)
-			->getResultDefinition()
-			->addSetup('addProvider', ['name' => 'encoreLoaderService', 'value' => $encoreLoaderService])
-			->addSetup('?->onCompile[] = function ($engine) { ?::install( $engine->getCompiler()); }', [
-				'@self',
-				new PhpLiteral(AssetMacroSet::class)
-			]);
+        if (!$definition instanceof FactoryDefinition) {
+            throw new InvalidConfigurationException(
+                sprintf(
+                    'latte.latteFactory service definition must be of type %s, not %s',
+                    FactoryDefinition::class,
+                    $definition::class
+                )
+            );
+        }
 
-		$builder->addFactoryDefinition($this->prefix('encoreLoaderFactory'))
-			->setImplement(EncoreLoaderFactory::class);
-	}
+        $serviceDefinition = $definition->getResultDefinition();
+        $serviceDefinition->addSetup('addExtension', [new Statement(\vavo\EncoreLoader\Latte\Extension\EncoreLoaderExtension::class)]);
+
+        $containerBuilder->addFactoryDefinition($this->prefix('encoreLoaderFactory'))
+            ->setImplement(EncoreLoaderFactory::class);
+    }
 }
